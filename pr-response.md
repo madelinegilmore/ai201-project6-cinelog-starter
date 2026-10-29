@@ -1,7 +1,7 @@
 # PR Response Doc — CineLog Watchlist Feature
 
 ## AI Usage
-<!-- Fill in at the end — how you used AI tools during this project -->
+Used AI assistance to inspect the collection model/service/test conventions, implement and verify the watchlist review changes, and organize the commit history. I reviewed the suggested changes, resolved the rebase/documentation conflicts, and ran the test suite locally; AI did not post comments or submit the PR.
 
 ## Comment 1 — Rename
 **What I did:** Renamed `save_to_watchlist()` to `add_to_watchlist()` in the service and updated the route import and call site to match the project's `verb_to_noun` convention.
@@ -31,4 +31,8 @@
 **How I verified no conflict remains:** `Film.id`, `CollectionEntry.film_id`, and `WatchlistEntry.film_id` are UUID-compatible `String(36)` columns; the service and route no longer document integer film IDs. `git log --merges origin/main..HEAD` returned no merge commits. The full `pytest tests/ -v` suite passed after restoring the sort-order work (7 tests).
 
 ## PR Description
-<!-- Written at the end — feature overview, design decisions, manual testing steps -->
+The watchlist feature lets users save films they plan to watch and retrieve their saved films with watchlist metadata. Adding an unknown film returns a not-found error, and adding the same film twice for one user is rejected. Film references use UUIDs, and watchlists are returned newest-added first.
+
+**Design decisions:** Watchlists default to public to support sharing and community discovery; users' interests may therefore be visible unless they choose private visibility. Results use descending `date_added`, so recent additions appear first; alphabetical sorting could be added as an optional view later.
+
+**Manual testing:** Start the Flask app with a database containing a user and film. POST `{"film_id":"<film-uuid>"}` to `/watchlist/<user-uuid>/add` and confirm a `201` response. POST the same film again and confirm `409 Conflict`. POST a nonexistent UUID and confirm `404 Not Found`. GET `/watchlist/<user-uuid>` and confirm entries include `date_added` and `public`, with the newest entry first.

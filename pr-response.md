@@ -30,9 +30,42 @@ Used AI assistance to inspect the collection model/service/test conventions, imp
 **How I resolved it:** Kept main's UUID-compatible `String(36)` foreign key. For this review request, fetched `origin` and ran `git rebase origin/main`; it completed without replay conflicts because `origin/main` was already an ancestor of the feature branch. Then committed the remaining stale integer references separately: the service documents `film_id` as a UUID string and the route documents a UUID request value. Commit: `fix: update WatchlistEntry film_id to UUID after main branch refactor` (`692de28`).
 **How I verified no conflict remains:** `Film.id`, `CollectionEntry.film_id`, and `WatchlistEntry.film_id` are UUID-compatible `String(36)` columns; the service and route no longer document integer film IDs. `git log --merges origin/main..HEAD` returned no merge commits. The full `pytest tests/ -v` suite passed after restoring the sort-order work (7 tests).
 
+![alt text](image.png)
+
 ## PR Description
-The watchlist feature lets users save films they plan to watch and retrieve their saved films with watchlist metadata. Adding an unknown film returns a not-found error, and adding the same film twice for one user is rejected. Film references use UUIDs, and watchlists are returned newest-added first.
 
-**Design decisions:** Watchlists default to public to support sharing and community discovery; users' interests may therefore be visible unless they choose private visibility. Results use descending `date_added`, so recent additions appear first; alphabetical sorting could be added as an optional view later.
+### What this does
+Adds a watchlist so users can save films they want to watch later, separate from their collection of films they've already logged. `POST /watchlist/<user_id>/add` saves a film by UUID, and `GET /watchlist/<user_id>` returns the saved films with each entry's `date_added` and `public` flag. Adding a film that doesn't exist returns 404, and adding a film that's already on the user's watchlist returns 409, the same way the collection endpoints behave.
 
-**Manual testing:** Start the Flask app with a database containing a user and film. POST `{"film_id":"<film-uuid>"}` to `/watchlist/<user-uuid>/add` and confirm a `201` response. POST the same film again and confirm `409 Conflict`. POST a nonexistent UUID and confirm `404 Not Found`. GET `/watchlist/<user-uuid>` and confirm entries include `date_added` and `public`, with the newest entry first.
+### Design decisions
+1. **Visibility default: public.** New watchlist entries are created with `public=True`. CineLog is a community app, and public watchlists let people find films through each other's lists without changing a setting on every entry. The tradeoff is that someone who thinks of their watchlist as personal is sharing it before making a choice. This PR doesn't add an endpoint for making an entry private; that would be a follow-up. A privacy-first product would make the opposite choice.
+2. **Sort order: newest added first.** `get_watchlist()` orders by `date_added` descending. Films saved recently are usually the ones the user cares about right now, and this matches `get_collection()`, which also returns newest first. Alphabetical order would help when browsing a long list, so it could be added later as an optional sort, not as the default.
+
+### How to test manually
+1. Install dependencies and seed a database:
+   ```bash
+   pip install -r requirements.txt
+   python seed.py
+   ```
+   Note the `user_id` that `seed.py` prints for the `demo` user.
+2. Start the app: `python app.py` (serves on `http://localhost:5000`).
+3. List films and copy two film `id` values:
+   ```bash
+   curl http://localhost:5000/films/
+   ```
+4. Add the first film:
+   ```bash
+   curl -X POST http://localhost:5000/watchlist/<user_id>/add \
+     -H "Content-Type: application/json" -d '{"film_id": "<film_id_1>"}'
+   ```
+   Expect **201** and an entry with `"public": true`.
+5. Wait a second, then repeat step 4 with `<film_id_2>`. Expect **201**.
+6. Repeat step 4 with `<film_id_1>` again. Expect **409** with an "already on this user's watchlist" error.
+7. Repeat step 4 with `{"film_id": "00000000-0000-0000-0000-000000000000"}`. Expect **404** with a "No film found" error.
+8. Repeat step 4 with an empty body `{}`. Expect **400** with "film_id is required".
+9. Get the watchlist:
+   ```bash
+   curl http://localhost:5000/watchlist/<user_id>
+   ```
+   Expect two films, each with `date_added` and `"public": true`, and film 2 listed **before** film 1 (newest first).
+10. Run the automated tests: `pytest tests/ -v` (7 tests should pass).
